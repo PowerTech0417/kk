@@ -2,6 +2,7 @@
   "name": "ott-protect-worker",
   "main": "worker.js",
   "compatibility_date": "2025-11-08",
+  "compatibility_flags": ["nodejs_compat"],
   "kv_namespaces": [
     { "binding": "UID_BINDINGS", "id": "3082747ee9174db1b99c36d04ac3aedf" }
   ],
