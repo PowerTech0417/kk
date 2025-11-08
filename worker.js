@@ -28,8 +28,7 @@ export default {
       // 非 OTT Player → 302 跳转到指定网站
       return Response.redirect(REDIRECT_URL, 302);
     }
-  },
-};
+  }
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
