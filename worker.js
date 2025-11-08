@@ -10,16 +10,14 @@ export default {
     const ottKeywords = ["OTT Player", "OTT TV", "OTT Navigator"]; // ✅ 允许 UA
     // =====================
 
-    // 检查 UA
+    // 1️⃣ 检查 User-Agent
     const ua = request.headers.get("User-Agent") || "";
     const isOTT = ottKeywords.some(keyword => ua.includes(keyword));
-
-    // 如果不是 OTT Player，则重定向
     if (!isOTT) {
       return Response.redirect(REDIRECT_URL, 302);
     }
 
-    // 检查授权参数
+    // 2️⃣ 校验参数
     const uid = params.get("uid");
     const exp = Number(params.get("exp"));
     const sig = params.get("sig");
@@ -28,20 +26,20 @@ export default {
       return new Response("🚫 Invalid Link (missing parameters)", { status: 403 });
     }
 
-    // 检查过期
+    // 3️⃣ 校验过期时间
     const now = Date.now();
     if (now > exp) {
       return new Response("⏰ Link Expired", { status: 403 });
     }
 
-    // 验证签名
+    // 4️⃣ 验证签名
     const text = `${uid}:${exp}`;
     const expectedSig = await sign(text, env.SIGN_SECRET);
     if (expectedSig !== sig) {
       return new Response("🚫 Invalid Signature", { status: 403 });
     }
 
-    // 绑定 UID 与 IP
+    // 5️⃣ 绑定 UID 与 IP
     const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
     const key = `uid:${uid}`;
     const stored = await env.UID_BINDINGS.get(key);
@@ -51,20 +49,21 @@ export default {
     }
 
     if (!stored) {
-      await env.UID_BINDINGS.put(key, ip, { expirationTtl: 86400 }); // 绑定 24 小时
+      await env.UID_BINDINGS.put(key, ip, { expirationTtl: 86400 }); // 绑定 24小时
     }
 
-    // 代理 GitHub Pages 内容
+    // 6️⃣ 转发到 GitHub Pages 内容
     const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
     const response = await fetch(target, {
       method: request.method,
       headers: request.headers,
     });
+
     return response;
-  }
+  },
 };
 
-// 签名函数
+// 🔐 签名函数
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
