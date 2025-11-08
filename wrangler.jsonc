@@ -1,0 +1,15 @@
+{
+  "name": "ott-worker",
+  "main": "worker.js",
+  "compatibility_date": "2025-11-08",
+  "kv_namespaces": [
+    { "binding": "UID_BINDINGS", "id": "3082747ee9174db1b99c36d04ac3aedf" }
+  ],
+  "vars": {
+    "SIGN_SECRET": "MySuperSecretKey123",
+    "GITHUB_URL": "https://yourusername.github.io/my-ott-site"
+  },
+  "assets": {
+    "directory": "./dist"
+  }
+}
