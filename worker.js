@@ -7,21 +7,21 @@ async function handleRequest(request) {
   const path = url.pathname;
   const params = url.searchParams;
 
-  // ========== 配置部分 ==========
+  // === ⚙️ 配置区 ===
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
+  const SIGN_SECRET = "mySuperSecretKey"; // ⚠️ 改成你自己的随机字符串
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
-  const SIGN_SECRET = "mySuperSecretKey"; // ⚠️ 自己定义
-  // ============================
+  // ================
 
-  // 1️⃣ 检查 UA
+  // 1️⃣ 检查 User-Agent
   const ua = request.headers.get("User-Agent") || "";
   const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
   if (!isOTT) {
     return Response.redirect(REDIRECT_URL, 302);
   }
 
-  // 2️⃣ 校验参数
+  // 2️⃣ 获取参数
   const uid = params.get("uid");
   const exp = Number(params.get("exp"));
   const sig = params.get("sig");
@@ -30,36 +30,39 @@ async function handleRequest(request) {
     return new Response("🚫 Invalid Link", { status: 403 });
   }
 
-  // 3️⃣ 检查过期
+  // 3️⃣ 检查是否过期
   const now = Date.now();
   if (now > exp) {
     return new Response("⏰ Link Expired", { status: 403 });
   }
 
-  // 4️⃣ 验证签名
+  // 4️⃣ 校验签名
   const text = `${uid}:${exp}`;
   const expectedSig = await sign(text, SIGN_SECRET);
   if (expectedSig !== sig) {
     return new Response("🚫 Invalid Signature", { status: 403 });
   }
 
-  // 5️⃣ 检查/绑定 IP
+  // 5️⃣ 绑定 IP （通过 Cloudflare KV）
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
   const key = `uid:${uid}`;
   const stored = await UID_BINDINGS.get(key);
+
   if (stored && stored !== ip) {
-    return new Response("🚫 IP Mismatch", { status: 403 });
-  }
-  if (!stored) {
-    await UID_BINDINGS.put(key, ip, { expirationTtl: 86400 }); // 24小时
+    return new Response("🚫 IP Mismatch - Unauthorized Access", { status: 403 });
   }
 
-  // 6️⃣ 转发内容
+  if (!stored) {
+    // 首次访问 → 绑定 IP，有效期 24 小时
+    await UID_BINDINGS.put(key, ip, { expirationTtl: 86400 });
+  }
+
+  // 6️⃣ 代理 GitHub Pages 内容
   const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
   return fetch(target, request);
 }
 
-// 🔐 签名函数
+// 🔐 签名生成函数
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
