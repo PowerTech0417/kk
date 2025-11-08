@@ -1,65 +1,41 @@
-export default {
-  async fetch(request, env, ctx) {
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const params = url.searchParams;
+addEventListener("fetch", event => {
+  event.respondWith(handleRequest(event.request, event));
+});
 
-    // === ⚙️ 配置区 ===
-    const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
-    const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
-    const SIGN_SECRET = "mySuperSecretKey"; // ⚠️ 改成你自己的随机字符串
-    const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
-    // ================
+async function handleRequest(request, event) {
+  // ⚙️ 配置
+  const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
+  const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
+  const SIGN_SECRET = "mySuperSecretKey";
+  const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
 
-    // 1️⃣ 检查 User-Agent
-    const ua = request.headers.get("User-Agent") || "";
-    const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
-    if (!isOTT) {
-      return Response.redirect(REDIRECT_URL, 302);
-    }
+  const url = new URL(request.url);
+  const ua = request.headers.get("User-Agent") || "";
+  const isOTT = OTT_KEYWORDS.some(k => ua.includes(k));
 
-    // 2️⃣ 获取参数
-    const uid = params.get("uid");
-    const exp = Number(params.get("exp"));
-    const sig = params.get("sig");
+  if (!isOTT) return Response.redirect(REDIRECT_URL, 302);
 
-    if (!uid || !exp || !sig) {
-      return new Response("🚫 Invalid Link", { status: 403 });
-    }
+  const uid = url.searchParams.get("uid");
+  const exp = Number(url.searchParams.get("exp"));
+  const sig = url.searchParams.get("sig");
+  if (!uid || !exp || !sig) return new Response("🚫 Invalid Link", { status: 403 });
 
-    // 3️⃣ 检查是否过期
-    const now = Date.now();
-    if (now > exp) {
-      return new Response("⏰ Link Expired", { status: 403 });
-    }
+  const now = Date.now();
+  if (now > exp) return new Response("⏰ Link Expired", { status: 403 });
 
-    // 4️⃣ 校验签名
-    const text = `${uid}:${exp}`;
-    const expectedSig = await sign(text, SIGN_SECRET);
-    if (expectedSig !== sig) {
-      return new Response("🚫 Invalid Signature", { status: 403 });
-    }
+  const expectedSig = await sign(`${uid}:${exp}`, SIGN_SECRET);
+  if (sig !== expectedSig) return new Response("🚫 Invalid Signature", { status: 403 });
 
-    // 5️⃣ 绑定 IP
-    const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
-    const key = `uid:${uid}`;
-    const stored = await env.UID_BINDINGS.get(key);
+  const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+  const key = `uid:${uid}`;
+  const stored = await UID_BINDINGS.get(key);
+  if (stored && stored !== ip) return new Response("🚫 IP Mismatch", { status: 403 });
+  if (!stored) await UID_BINDINGS.put(key, ip, { expirationTtl: 86400 });
 
-    if (stored && stored !== ip) {
-      return new Response("🚫 IP Mismatch - Unauthorized Access", { status: 403 });
-    }
+  const target = `${GITHUB_PAGES_URL}${url.pathname}${url.search}`;
+  return fetch(target, request);
+}
 
-    if (!stored) {
-      await env.UID_BINDINGS.put(key, ip, { expirationTtl: 86400 });
-    }
-
-    // 6️⃣ 转发到 GitHub Pages
-    const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
-    return fetch(target, request);
-  },
-};
-
-// 🔐 签名函数
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
