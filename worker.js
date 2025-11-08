@@ -10,7 +10,7 @@ async function handleRequest(request, event) {
   // === ⚙️ 配置区 ===
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
-  const EXPIRE_REDIRECT_URL = "https://life4u22.blogspot.com/p/link-expired.html"; // ✅ 新增：过期跳转页
+  const EXPIRE_REDIRECT_URL = "https://life4u22.blogspot.com/"; // ✅ 新增：过期跳转页
   const SIGN_SECRET = "mySuperSecretKey"; // ⚠️ 请修改为你自己的随机密钥
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
