@@ -7,9 +7,5 @@
       "binding": "UID_BINDINGS",
       "id": "3082747ee9174db1b99c36d04ac3aedf"
     }
-  ],
-  "vars": {
-    "SIGN_SECRET_GLOBAL": "mySuperSecretKey",
-    "GITHUB_URL": "https://skyline5108.github.io/playlist"
-  }
+  ]
 }
