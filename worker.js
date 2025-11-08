@@ -1,8 +1,8 @@
 addEventListener("fetch", event => {
-  event.respondWith(handleRequest(event.request));
+  event.respondWith(handleRequest(event.request, event));
 });
 
-async function handleRequest(request) {
+async function handleRequest(request, event) {
   const url = new URL(request.url);
   const path = url.pathname;
   const params = url.searchParams;
@@ -10,7 +10,7 @@ async function handleRequest(request) {
   // === ⚙️ 配置区 ===
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
-  const SIGN_SECRET = "mySuperSecretKey"; // ⚠️ 改成你自己的随机字符串
+  const SIGN_SECRET = "mySuperSecretKey"; // ⚠️ 修改为你自己的随机密钥
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
 
@@ -21,11 +21,10 @@ async function handleRequest(request) {
     return Response.redirect(REDIRECT_URL, 302);
   }
 
-  // 2️⃣ 获取参数
+  // 2️⃣ 解析参数
   const uid = params.get("uid");
   const exp = Number(params.get("exp"));
   const sig = params.get("sig");
-
   if (!uid || !exp || !sig) {
     return new Response("🚫 Invalid Link", { status: 403 });
   }
@@ -47,21 +46,19 @@ async function handleRequest(request) {
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
   const key = `uid:${uid}`;
   const stored = await UID_BINDINGS.get(key);
-
   if (stored && stored !== ip) {
     return new Response("🚫 IP Mismatch - Unauthorized Access", { status: 403 });
   }
-
   if (!stored) {
-    await UID_BINDINGS.put(key, ip, { expirationTtl: 86400 });
+    await UID_BINDINGS.put(key, ip, { expirationTtl: 86400 }); // 24小时有效
   }
 
-  // 6️⃣ 转发 GitHub Pages 内容
+  // 6️⃣ 代理到 GitHub Pages
   const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
   return fetch(target, request);
 }
 
-// 🔐 签名函数
+// 🔐 HMAC 签名函数
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
