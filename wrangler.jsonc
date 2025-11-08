@@ -1,10 +1,12 @@
 {
-  "name": "ott-worker",
+  "name": "powertech",
   "main": "worker.js",
   "compatibility_date": "2025-11-08",
   "kv_namespaces": [
     { "binding": "UID_BINDINGS", "id": "3082747ee9174db1b99c36d04ac3aedf" }
   ],
-  "build": {
-    "command": ""
+  "vars": {
+    "SIGN_SECRET_GLOBAL": "mySuperSecretKey",
+    "GITHUB_URL": "https://skyline5108.github.io/playlist"
   }
+}
