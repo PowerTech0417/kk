@@ -7,7 +7,7 @@
   ],
   "vars": {
     "SIGN_SECRET": "MySuperSecretKey123",
-    "GITHUB_URL": "https://yourusername.github.io/my-ott-site"
+    "GITHUB_URL": "https://powertech0417.github.io/op/"
   },
   "assets": {
     "directory": "./dist"
