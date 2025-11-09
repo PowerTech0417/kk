@@ -2,7 +2,7 @@ addEventListener("fetch", event => {
   event.respondWith(handleRequest(event.request, event));
 });
 
-async function handleRequest(request, event) {
+async function handleRequest(request, event, env) {
   const url = new URL(request.url);
   const path = url.pathname;
   const params = url.searchParams;
@@ -37,12 +37,12 @@ async function handleRequest(request, event) {
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 生成设备指纹（兼容不同 OTT App）
+  // 5️⃣ 生成设备指纹
   const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
 
-  // 6️⃣ 检查 KV 永久绑定（同一设备共用）
+  // 6️⃣ 检查 KV 永久绑定
   const key = `uid:${uid}`;
-  const storedFingerprint = await UID_BINDINGS.get(key);
+  const storedFingerprint = await env.UID_BINDINGS.get(key);
 
   if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
     return Response.redirect(IP_LOCK_URL, 302);
@@ -50,7 +50,7 @@ async function handleRequest(request, event) {
 
   if (!storedFingerprint) {
     // ✅ 永久保存（不设置 TTL）
-    await UID_BINDINGS.put(key, deviceFingerprint);
+    await env.UID_BINDINGS.put(key, deviceFingerprint);
   }
 
   // 7️⃣ 允许访问 GitHub Pages 内容
@@ -77,22 +77,17 @@ async function sign(text, secret) {
 
 /**
  * 📱 设备指纹提取（兼容 OTT App）
- * - 移除 App 名称部分
- * - 保留硬件/系统标识
  */
 async function getDeviceFingerprint(ua, uid, secret) {
-  // 清理掉 OTT 应用名
   const baseUA = ua
     .replace(/OTT\s*(Player|TV|Navigator)/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 
-  // 抽取硬件/系统信息（Android/iOS版本 + 型号）
   const simplifiedUA = baseUA
     .match(/(Android [0-9.]+|Linux|SmartTV|AFTMM|AFTT|Tizen|Web0S|AppleTV|Build\/[A-Za-z0-9]+)/g)
     ?.join("_") || baseUA.slice(0, 60);
 
-  // 加上 UID 保证唯一性
   const fingerprintText = `${uid}:${simplifiedUA}`;
   return await sign(fingerprintText, secret);
 }
