@@ -11,6 +11,7 @@ async function handleRequest(request) {
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
   const IP_LOCK_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 设备冲突跳转
+  const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 🆕 非 OTT 打开跳转
   const SIGN_SECRET = "mySuperSecretKey"; // 用于签名验证
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
@@ -35,7 +36,9 @@ async function handleRequest(request) {
   // 1️⃣ 检查 User-Agent 是否 OTT 应用
   const ua = request.headers.get("User-Agent") || "";
   const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
-  if (!isOTT) return Response.redirect(IP_LOCK_URL, 302);
+
+  // 🆕 如果不是 OTT 应用 → 跳转到频道说明页
+  if (!isOTT) return Response.redirect(NON_OTT_REDIRECT_URL, 302);
 
   // 2️⃣ 解析签名参数
   const uid = params.get("uid");
@@ -73,7 +76,7 @@ async function handleRequest(request) {
   }
 
   if (!storedFingerprint) {
-    // ✅ 永久保存（免费 Cloudflare KV 默认永久有效）
+    // ✅ 永久保存
     await UID_BINDINGS.put(key, deviceFingerprint);
   }
 
@@ -101,22 +104,17 @@ async function sign(text, secret) {
 
 /**
  * 📱 设备指纹提取（兼容 OTT App）
- * - 移除 App 名称部分
- * - 保留硬件/系统标识
  */
 async function getDeviceFingerprint(ua, uid, secret) {
-  // 清理掉 OTT 应用名
   const baseUA = ua
     .replace(/OTT\s*(Player|TV|Navigator)/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 
-  // 抽取硬件/系统信息（Android/iOS版本 + 型号）
   const simplifiedUA = baseUA
     .match(/(Android [0-9.]+|Linux|SmartTV|AFTMM|AFTT|Tizen|Web0S|AppleTV|Build\/[A-Za-z0-9]+)/g)
     ?.join("_") || baseUA.slice(0, 60);
 
-  // 加上 UID 保证唯一性
   const fingerprintText = `${uid}:${simplifiedUA}`;
   return await sign(fingerprintText, secret);
 }
