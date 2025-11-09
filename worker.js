@@ -18,7 +18,7 @@ async function handleRequest(request, event) {
   // 1️⃣ 检查 User-Agent 是否 OTT 应用
   const ua = request.headers.get("User-Agent") || "";
   const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
-  if (!isOTT) return Response.redirect(EXPIRED_REDIRECT_URL, 302);
+  if (!isOTT) return Response.redirect(IP_LOCK_URL, 302);
 
   // 2️⃣ 解析签名参数
   const uid = params.get("uid");
