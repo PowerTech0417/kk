@@ -10,7 +10,7 @@ async function handleRequest(request) {
   // === ⚙️ 配置区 ===
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
-  const IP_LOCK_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 设备冲突跳转
+  const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 其他设备登入跳转
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 非 OTT 打开跳转
   const SIGN_SECRET = "mySuperSecretKey"; // 签名密钥
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
@@ -76,10 +76,12 @@ async function handleRequest(request) {
   }
 
   if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
-    return Response.redirect(IP_LOCK_URL, 302);
+    // 🚫 不同设备登入 → 重定向封锁页
+    return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
   if (!storedFingerprint) {
+    // ✅ 首次绑定设备（Cloudflare KV 免费计划默认永久保存）
     await UID_BINDINGS.put(key, deviceFingerprint);
   }
 
