@@ -11,33 +11,33 @@ async function handleRequest(request) {
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
   const IP_LOCK_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 设备冲突跳转
-  const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 🆕 非 OTT 打开跳转
-  const SIGN_SECRET = "mySuperSecretKey"; // 用于签名验证
+  const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 非 OTT 打开跳转
+  const SIGN_SECRET = "mySuperSecretKey"; // 签名密钥
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
 
-  // ✅ 特殊路径：/test — 测试 KV 是否工作
+  // ✅ 测试路径：/test 可查看马来西亚当前时间 + KV 测试
   if (path === "/test") {
+    const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000); // 🇲🇾 UTC+8
+    const formattedMY = malaysiaNow.toISOString().replace("T", " ").slice(0, 19);
     try {
       await UID_BINDINGS.put("test-key", "hello-world");
       const val = await UID_BINDINGS.get("test-key");
-      return new Response(`✅ KV 测试结果: ${val || "未读取到值"}`, {
-        status: 200,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+      return new Response(
+        `✅ KV 测试结果: ${val || "未读取到值"}\n🕒 当前马来西亚时间: ${formattedMY}`,
+        { status: 200, headers: { "content-type": "text/plain; charset=utf-8" } }
+      );
     } catch (e) {
-      return new Response(`❌ KV 测试失败: ${e.message}`, {
-        status: 500,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      });
+      return new Response(
+        `❌ KV 测试失败: ${e.message}\n🕒 马来西亚时间: ${formattedMY}`,
+        { status: 500, headers: { "content-type": "text/plain; charset=utf-8" } }
+      );
     }
   }
 
   // 1️⃣ 检查 User-Agent 是否 OTT 应用
   const ua = request.headers.get("User-Agent") || "";
   const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
-
-  // 🆕 如果不是 OTT 应用 → 跳转到频道说明页
   if (!isOTT) return Response.redirect(NON_OTT_REDIRECT_URL, 302);
 
   // 2️⃣ 解析签名参数
@@ -47,9 +47,21 @@ async function handleRequest(request) {
   if (!uid || !exp || !sig)
     return new Response("🚫 Invalid Link", { status: 403 });
 
-  // 3️⃣ 过期检查
-  const now = Date.now();
-  if (now > exp) return Response.redirect(EXPIRED_REDIRECT_URL, 302);
+  // 🇲🇾 当前马来西亚时间（UTC+8）
+  const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  const nowMillis = malaysiaNow.getTime();
+
+  // 3️⃣ 过期检查（使用马来西亚时间）
+  if (nowMillis > exp) {
+    const expMY = new Date(exp + 8 * 60 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
+    return new Response(
+      `🔒 链接已过期。\n🕒 当前马来西亚时间：${malaysiaNow.toISOString().replace("T", " ").slice(0, 19)}\n📅 设定过期时间：${expMY}`,
+      {
+        status: 403,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      }
+    );
+  }
 
   // 4️⃣ 验证签名
   const text = `${uid}:${exp}`;
@@ -57,7 +69,7 @@ async function handleRequest(request) {
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 生成设备指纹（兼容不同 OTT App）
+  // 5️⃣ 生成设备指纹
   const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
 
   // 6️⃣ 检查 KV 永久绑定（同一设备共用）
@@ -71,12 +83,10 @@ async function handleRequest(request) {
   }
 
   if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
-    // 不同设备访问同一个 UID → 封锁
     return Response.redirect(IP_LOCK_URL, 302);
   }
 
   if (!storedFingerprint) {
-    // ✅ 永久保存
     await UID_BINDINGS.put(key, deviceFingerprint);
   }
 
@@ -103,7 +113,7 @@ async function sign(text, secret) {
 }
 
 /**
- * 📱 设备指纹提取（兼容 OTT App）
+ * 📱 设备指纹提取
  */
 async function getDeviceFingerprint(ua, uid, secret) {
   const baseUA = ua
