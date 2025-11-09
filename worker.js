@@ -7,25 +7,23 @@ export default {
     // === ⚙️ 配置区 ===
     const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
     const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 非 OTT 访问
-    const EXPIRED_REDIRECT = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
-    const IP_LOCK_REDIRECT = "https://life4u22.blogspot.com/p/id-ban.html"; // IP/设备锁
-    const SIGN_SECRET = "mySuperSecretKey"; // 你设置的密钥
-    const OTT_KEYWORDS = ["OTT TV", "OTT Player", "OTT Navigator"]; // ✅ 仅允许这些播放器
+    const EXPIRED_REDIRECT = "https://life4u22.blogspot.com/p/powertech.html";      // 链接过期跳转
+    const IP_LOCK_REDIRECT = "https://life4u22.blogspot.com/p/id-ban.html";          // IP/设备锁跳转
+    const SIGN_SECRET = "mySuperSecretKey";  // 你的密钥
+    const OTT_KEYWORDS = ["OTT TV", "OTT Player", "OTT Navigator"]; // ✅ 允许的播放器
     // ==================
 
+    // 1️⃣ 检查是否 OTT Player UA
     const ua = request.headers.get("User-Agent") || "";
-    const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
-    const uid = params.get("uid");
-    const exp = Number(params.get("exp"));
-    const sig = params.get("sig");
-
-    // 1️⃣ 检查 User-Agent 是否允许
     const isOTT = OTT_KEYWORDS.some(k => ua.includes(k));
     if (!isOTT) {
       return Response.redirect(REDIRECT_URL, 302);
     }
 
     // 2️⃣ 检查参数完整性
+    const uid = params.get("uid");
+    const exp = Number(params.get("exp"));
+    const sig = params.get("sig");
     if (!uid || !exp || !sig) {
       return new Response("🚫 Invalid Link", { status: 403 });
     }
@@ -42,24 +40,25 @@ export default {
       return new Response("🚫 Invalid Signature", { status: 403 });
     }
 
-    // 5️⃣ 生成唯一指纹（防止同Wi-Fi多设备共享）
+    // 5️⃣ 生成设备唯一指纹（IP + UA + 设备特征）
+    const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
     const fingerprint = await sha256(`${ip}|${ua}`);
 
-    // 6️⃣ KV 存储验证
+    // 6️⃣ 检查 KV 中是否已有绑定
     const key = `uid:${uid}`;
     const storedFingerprint = await env.UID_BINDINGS.get(key);
 
     if (storedFingerprint && storedFingerprint !== fingerprint) {
-      // ⚠️ 其他设备尝试访问（即使同 Wi-Fi）
+      // ❌ 其他设备尝试访问（不论是否同网段）
       return Response.redirect(IP_LOCK_REDIRECT, 302);
     }
 
-    // 7️⃣ 第一次访问则绑定指纹
+    // 7️⃣ 首次访问 → 绑定该设备
     if (!storedFingerprint) {
-      await env.UID_BINDINGS.put(key, fingerprint, { expirationTtl: 86400 }); // 24 小时有效
+      await env.UID_BINDINGS.put(key, fingerprint, { expirationTtl: 86400 }); // 24小时绑定
     }
 
-    // 8️⃣ 转发至 GitHub Pages 内容
+    // 8️⃣ 转发 GitHub Pages 内容
     const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
     return fetch(target, request);
   },
