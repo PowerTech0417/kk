@@ -51,16 +51,9 @@ async function handleRequest(request) {
   const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
   const nowMillis = malaysiaNow.getTime();
 
-  // 3️⃣ 过期检查（使用马来西亚时间）
+  // 3️⃣ 过期检查（改为重定向）
   if (nowMillis > exp) {
-    const expMY = new Date(exp + 8 * 60 * 60 * 1000).toISOString().replace("T", " ").slice(0, 19);
-    return new Response(
-      `🔒 链接已过期。\n🕒 当前马来西亚时间：${malaysiaNow.toISOString().replace("T", " ").slice(0, 19)}\n📅 设定过期时间：${expMY}`,
-      {
-        status: 403,
-        headers: { "content-type": "text/plain; charset=utf-8" },
-      }
-    );
+    return Response.redirect(EXPIRED_REDIRECT_URL, 302);
   }
 
   // 4️⃣ 验证签名
