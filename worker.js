@@ -1,8 +1,8 @@
 addEventListener("fetch", event => {
-  event.respondWith(handleRequest(event.request, event));
+  event.respondWith(handleRequest(event.request));
 });
 
-async function handleRequest(request, event, env) {
+async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
   const params = url.searchParams;
@@ -11,9 +11,26 @@ async function handleRequest(request, event, env) {
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
   const IP_LOCK_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 设备冲突跳转
-  const SIGN_SECRET = "mySuperSecretKey";
+  const SIGN_SECRET = "mySuperSecretKey"; // 用于签名验证
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
+
+  // ✅ 特殊路径：/test — 测试 KV 是否工作
+  if (path === "/test") {
+    try {
+      await UID_BINDINGS.put("test-key", "hello-world");
+      const val = await UID_BINDINGS.get("test-key");
+      return new Response(`✅ KV 测试结果: ${val || "未读取到值"}`, {
+        status: 200,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    } catch (e) {
+      return new Response(`❌ KV 测试失败: ${e.message}`, {
+        status: 500,
+        headers: { "content-type": "text/plain; charset=utf-8" },
+      });
+    }
+  }
 
   // 1️⃣ 检查 User-Agent 是否 OTT 应用
   const ua = request.headers.get("User-Agent") || "";
@@ -37,20 +54,27 @@ async function handleRequest(request, event, env) {
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 生成设备指纹
+  // 5️⃣ 生成设备指纹（兼容不同 OTT App）
   const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
 
-  // 6️⃣ 检查 KV 永久绑定
+  // 6️⃣ 检查 KV 永久绑定（同一设备共用）
   const key = `uid:${uid}`;
-  const storedFingerprint = await env.UID_BINDINGS.get(key);
+  let storedFingerprint = null;
+
+  try {
+    storedFingerprint = await UID_BINDINGS.get(key);
+  } catch (err) {
+    return new Response("⚠️ KV 未绑定或读取失败，请检查配置。", { status: 500 });
+  }
 
   if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
+    // 不同设备访问同一个 UID → 封锁
     return Response.redirect(IP_LOCK_URL, 302);
   }
 
   if (!storedFingerprint) {
-    // ✅ 永久保存（不设置 TTL）
-    await env.UID_BINDINGS.put(key, deviceFingerprint);
+    // ✅ 永久保存（免费 Cloudflare KV 默认永久有效）
+    await UID_BINDINGS.put(key, deviceFingerprint);
   }
 
   // 7️⃣ 允许访问 GitHub Pages 内容
@@ -59,7 +83,7 @@ async function handleRequest(request, event, env) {
 }
 
 /**
- * 🔐 HMAC 签名函数
+ * 🔐 HMAC SHA256 签名函数
  */
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
@@ -77,17 +101,22 @@ async function sign(text, secret) {
 
 /**
  * 📱 设备指纹提取（兼容 OTT App）
+ * - 移除 App 名称部分
+ * - 保留硬件/系统标识
  */
 async function getDeviceFingerprint(ua, uid, secret) {
+  // 清理掉 OTT 应用名
   const baseUA = ua
     .replace(/OTT\s*(Player|TV|Navigator)/gi, "")
     .replace(/\s+/g, " ")
     .trim();
 
+  // 抽取硬件/系统信息（Android/iOS版本 + 型号）
   const simplifiedUA = baseUA
     .match(/(Android [0-9.]+|Linux|SmartTV|AFTMM|AFTT|Tizen|Web0S|AppleTV|Build\/[A-Za-z0-9]+)/g)
     ?.join("_") || baseUA.slice(0, 60);
 
+  // 加上 UID 保证唯一性
   const fingerprintText = `${uid}:${simplifiedUA}`;
   return await sign(fingerprintText, secret);
 }
