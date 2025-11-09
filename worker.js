@@ -5,7 +5,7 @@ export default {
     const params = url.searchParams;
 
     // === ⚙️ 配置区 ===
-    const GITHUB_PAGES_URL = "https://drive.google.com/uc?export=download&id=1gIiKvfvHdBOqGPLNjc0qZ3qf356-JSKR";
+    const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
     const REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
     const EXPIRED_REDIRECT = "https://life4u22.blogspot.com/p/powertech.html";
     const IP_LOCK_REDIRECT = "https://life4u22.blogspot.com/p/id-ban.html";
