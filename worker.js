@@ -37,22 +37,27 @@ async function handleRequest(request, event) {
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 生成设备指纹（UID + UA）
-  const uaHash = await sign(`${uid}:${ua}`, SIGN_SECRET);
+  // 5️⃣ 提取 UA 中的设备信息（排除 app 名）
+  const cleanedUA = ua
+    .replace(/OTT\s*(Player|TV|Navigator)/gi, "")
+    .trim();
+
+  // 6️⃣ 生成设备指纹（UID + cleaned UA）
+  const deviceFingerprint = await sign(`${uid}:${cleanedUA}`, SIGN_SECRET);
   const key = `uid:${uid}`;
   const stored = await UID_BINDINGS.get(key);
 
-  // 6️⃣ 检查设备冲突（允许同设备不同网络使用）
-  if (stored && stored !== uaHash) {
+  // 7️⃣ 检查是否为同一设备
+  if (stored && stored !== deviceFingerprint) {
     return Response.redirect(IP_LOCK_URL, 302);
   }
 
-  // 7️⃣ 保存设备指纹（24 小时）
+  // 8️⃣ 保存绑定（同设备可跨 app / 网络使用）
   if (!stored) {
-    await UID_BINDINGS.put(key, uaHash, { expirationTtl: 86400 });
+    await UID_BINDINGS.put(key, deviceFingerprint, { expirationTtl: 86400 });
   }
 
-  // 8️⃣ 代理访问
+  // 9️⃣ 代理到 GitHub Pages
   const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
   return fetch(target, request);
 }
