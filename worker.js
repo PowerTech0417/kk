@@ -10,7 +10,7 @@ export default {
     const EXPIRED_REDIRECT = "https://life4u22.blogspot.com/p/powertech.html";
     const IP_LOCK_REDIRECT = "https://life4u22.blogspot.com/p/id-ban.html";
     const SIGN_SECRET = "mySuperSecretKey"; // 你自己的密钥
-    const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigate"];
+    const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
     // ==================
 
     // 获取 User-Agent
