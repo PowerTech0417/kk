@@ -14,6 +14,7 @@ async function handleRequest(request) {
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 非 OTT 打开跳转
   const SIGN_SECRET = "mySuperSecretKey"; // 签名密钥
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"]; // 允许的应用
+  const MAX_APP_PER_DEVICE = 3; // ✅ 同一设备最多绑定 3 个 OTT 应用
   // =================
 
   // ✅ 测试路径
@@ -35,7 +36,7 @@ async function handleRequest(request) {
     }
   }
 
-  // 1️⃣ 检查 User-Agent 是否 OTT 应用（限制在 Android 平台）
+  // 1️⃣ 检查 User-Agent 是否 OTT 应用 + Android 平台
   const ua = request.headers.get("User-Agent") || "";
   const isAndroid = ua.includes("Android");
   const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
@@ -63,40 +64,64 @@ async function handleRequest(request) {
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 生成设备指纹（包含 UA + IP + UID）
+  // 5️⃣ 获取设备与应用指纹
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
-  const deviceFingerprint = await getDeviceFingerprint(ua, ip, uid, SIGN_SECRET);
+  const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || "Unknown";
+  const deviceBase = await getDeviceFingerprint(ua, ip, uid, SIGN_SECRET); // 设备唯一指纹
+  const appFingerprint = await sign(`${deviceBase}:${appType}`, SIGN_SECRET); // 设备+App 唯一标识
 
-  // 6️⃣ KV 检查与绑定逻辑
+  // 6️⃣ 从 KV 获取绑定数据
   const key = `uid:${uid}`;
-  let storedFingerprint = null;
-
+  let storedData = [];
   try {
-    storedFingerprint = await UID_BINDINGS.get(key);
+    const json = await UID_BINDINGS.get(key);
+    if (json) storedData = JSON.parse(json);
   } catch (err) {
     return new Response("⚠️ KV 读取失败，请检查配置。", { status: 500 });
   }
 
-  // 🧠 强化规则：
-  // 第一次登入：绑定设备；
-  // 后续登入：必须相同指纹，否则封锁。
-  if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
+  // 🧠 检查是否为同一设备
+  const sameDevice = storedData.some(entry => entry.device === deviceBase);
+
+  // ✅ 如果同设备且已绑定相同 App，不阻止
+  if (storedData.some(entry => entry.appFingerprint === appFingerprint)) {
+    return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
+  }
+
+  // ✅ 如果是同一设备但不同 OTT App，允许最多 3 个
+  if (sameDevice) {
+    const appsOnDevice = storedData.filter(entry => entry.device === deviceBase);
+    if (appsOnDevice.length >= MAX_APP_PER_DEVICE) {
+      return Response.redirect(DEVICE_CONFLICT_URL, 302);
+    }
+    storedData.push({ device: deviceBase, appFingerprint, appType });
+    await UID_BINDINGS.put(key, JSON.stringify(storedData));
+    console.log(`✅ UID ${uid} 添加第 ${appsOnDevice.length + 1} 个 OTT 应用: ${appType}`);
+    return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
+  }
+
+  // 🚫 不同设备登入：封锁
+  if (storedData.length > 0 && !sameDevice) {
     return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
-  if (!storedFingerprint) {
-    await UID_BINDINGS.put(key, deviceFingerprint);
+  // 🆕 首次登入：绑定新设备
+  if (storedData.length === 0) {
+    storedData.push({ device: deviceBase, appFingerprint, appType });
+    await UID_BINDINGS.put(key, JSON.stringify(storedData));
+    console.log(`✅ UID ${uid} 首次绑定设备与应用: ${appType}`);
+    return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
   }
 
-  // 📢 首次绑定提示（仅显示在控制台）
-  if (!storedFingerprint) {
-    console.log(`✅ UID ${uid} 首次绑定设备`);
-    console.log(`UA: ${ua}`);
-    console.log(`IP: ${ip}`);
-  }
+  // 默认转发
+  return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
+}
 
-  // 7️⃣ 转发访问 GitHub Pages 内容
-  const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
+/**
+ * 🌐 转发到 GitHub Pages
+ */
+async function proxyToGitHub(request, url, path, baseUrl) {
+  const target = `${baseUrl}${path}${url.search}`;
   return fetch(target, request);
 }
 
