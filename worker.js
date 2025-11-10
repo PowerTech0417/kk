@@ -9,9 +9,11 @@ async function handleRequest(request) {
 
   // === ⚙️ 配置区 ===
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
-  const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html";
-  const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html";
-  const SIGN_SECRET = "mySuperSecretKey";
+  const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
+  const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 其他设备登入跳转
+  const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 非 OTT 打开跳转
+  const SIGN_SECRET = "mySuperSecretKey"; // 签名密钥
+  const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"]; // 允许的应用
   // =================
 
   // ✅ 测试路径
@@ -33,7 +35,15 @@ async function handleRequest(request) {
     }
   }
 
-  // 1️⃣ 解析签名参数
+  // 1️⃣ 检查 User-Agent 是否 OTT 应用（限制在 Android 平台）
+  const ua = request.headers.get("User-Agent") || "";
+  const isAndroid = ua.includes("Android");
+  const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
+  if (!isAndroid || !isOTT) {
+    return Response.redirect(NON_OTT_REDIRECT_URL, 302);
+  }
+
+  // 2️⃣ 解析签名参数
   const uid = params.get("uid");
   const exp = Number(params.get("exp"));
   const sig = params.get("sig");
@@ -43,111 +53,55 @@ async function handleRequest(request) {
   // 🇲🇾 当前马来西亚时间（UTC+8）
   const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
   const nowMillis = malaysiaNow.getTime();
-  const formattedMY = malaysiaNow.toISOString().replace("T", " ").slice(0, 19);
 
-  // 2️⃣ 过期检查
+  // 3️⃣ 过期检查
   if (nowMillis > exp) return Response.redirect(EXPIRED_REDIRECT_URL, 302);
 
-  // 3️⃣ 验证签名
+  // 4️⃣ 验证签名
   const text = `${uid}:${exp}`;
   const expectedSig = await sign(text, SIGN_SECRET);
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 4️⃣ 生成设备指纹（IP + UA + UID）
-  const ua = request.headers.get("User-Agent") || "";
+  // 5️⃣ 生成设备指纹（包含 UA + IP + UID）
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
   const deviceFingerprint = await getDeviceFingerprint(ua, ip, uid, SIGN_SECRET);
 
-  // 5️⃣ 检查 KV 是否已绑定
+  // 6️⃣ KV 检查与绑定逻辑
   const key = `uid:${uid}`;
   let storedFingerprint = null;
+
   try {
     storedFingerprint = await UID_BINDINGS.get(key);
   } catch (err) {
     return new Response("⚠️ KV 读取失败，请检查配置。", { status: 500 });
   }
 
-  // 🚫 不同设备登入
+  // 🧠 强化规则：
+  // 第一次登入：绑定设备；
+  // 后续登入：必须相同指纹，否则封锁。
   if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
     return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
-  // ✅ 首次登入 → 绑定并显示提示页（自动跳转 5 秒）
   if (!storedFingerprint) {
     await UID_BINDINGS.put(key, deviceFingerprint);
-    const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
-    return new Response(
-      `
-      <html lang="zh">
-        <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-          <title>设备已绑定成功</title>
-          <meta http-equiv="refresh" content="5; url=${target}" />
-          <style>
-            body {
-              background:#0a1a3a;
-              color:white;
-              font-family:Arial, sans-serif;
-              text-align:center;
-              padding-top:15%;
-            }
-            h1 {
-              font-size:2.2em;
-              color:#00ff88;
-            }
-            p {
-              font-size:1.1em;
-              opacity:0.9;
-            }
-            a {
-              color:#00c3ff;
-              text-decoration:none;
-              font-weight:bold;
-            }
-            .countdown {
-              margin-top:20px;
-              font-size:1.2em;
-              color:#ffcc00;
-            }
-            .time {
-              margin-top:15px;
-              color:#aaa;
-              font-size:1em;
-            }
-          </style>
-        </head>
-        <body>
-          <h1>✅ 设备已成功绑定</h1>
-          <p>UID：<b>${uid}</b></p>
-          <p>绑定时间（马来西亚）：<br><b>${formattedMY}</b></p>
-          <p>系统将在 <span id="seconds">5</span> 秒后自动进入内容。</p>
-          <div class="countdown">若未跳转，请 <a href="${target}">点此进入</a></div>
-
-          <script>
-            let s = 5;
-            const el = document.getElementById("seconds");
-            const timer = setInterval(()=>{
-              s--;
-              if(s <= 0) clearInterval(timer);
-              el.textContent = s;
-            },1000);
-          </script>
-        </body>
-      </html>
-      `,
-      { status: 200, headers: { "content-type": "text/html; charset=utf-8" } }
-    );
   }
 
-  // 6️⃣ 已绑定设备 → 直接访问内容
+  // 📢 首次绑定提示（仅显示在控制台）
+  if (!storedFingerprint) {
+    console.log(`✅ UID ${uid} 首次绑定设备`);
+    console.log(`UA: ${ua}`);
+    console.log(`IP: ${ip}`);
+  }
+
+  // 7️⃣ 转发访问 GitHub Pages 内容
   const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
   return fetch(target, request);
 }
 
 /**
- * 🔐 HMAC SHA256 签名函数
+ * 🔐 HMAC SHA256 签名
  */
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
@@ -164,7 +118,7 @@ async function sign(text, secret) {
 }
 
 /**
- * 📱 设备指纹（UID + IP + UA）
+ * 📱 设备指纹（加入 IP + UA + UID）
  */
 async function getDeviceFingerprint(ua, ip, uid, secret) {
   const cleanUA = ua.replace(/\s+/g, " ").trim().slice(0, 100);
