@@ -8,7 +8,7 @@ async function handleRequest(request) {
   const params = url.searchParams;
 
   // === ⚙️ 配置区 ===
-  const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
+  const GITHUB_PAGES_URL = "https://modskyshop168-sudo.github.io/cc/";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html";
   const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html";
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
