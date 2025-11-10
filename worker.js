@@ -10,14 +10,14 @@ async function handleRequest(request) {
   // === ⚙️ 配置区 ===
   const GITHUB_PAGES_URL = "https://skyline5108.github.io/playlist";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html"; // 过期跳转
-  const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 其他设备登入跳转
+  const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html"; // 封锁跳转
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html"; // 非 OTT 打开跳转
-  const SIGN_SECRET = "mySuperSecretKey"; // 签名密钥
-  const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"]; // 允许的应用
-  const MAX_APP_PER_DEVICE = 3; // ✅ 同一设备最多绑定 3 个 OTT 应用
+  const SIGN_SECRET = "mySuperSecretKey"; // 签名密钥（请换成你的密钥）
+  const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"]; // 允许的应用识别关键字
+  const MAX_APPS_PER_DEVICE = 3; // 同一设备最多允许绑定多少个不同 OTT APP
   // =================
 
-  // ✅ 测试路径
+  // ✅ 测试路径：/test 检查 KV 写读与马来西亚时间
   if (path === "/test") {
     const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
     const formattedMY = malaysiaNow.toISOString().replace("T", " ").slice(0, 19);
@@ -36,11 +36,11 @@ async function handleRequest(request) {
     }
   }
 
-  // 1️⃣ 检查 User-Agent 是否 OTT 应用 + Android 平台
+  // 1️⃣ 检查 UA：必须是 Android && 必须包含允许的 OTT 关键字
   const ua = request.headers.get("User-Agent") || "";
   const isAndroid = ua.includes("Android");
-  const isOTT = OTT_KEYWORDS.some(keyword => ua.includes(keyword));
-  if (!isAndroid || !isOTT) {
+  const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || null;
+  if (!isAndroid || !appType) {
     return Response.redirect(NON_OTT_REDIRECT_URL, 302);
   }
 
@@ -48,8 +48,7 @@ async function handleRequest(request) {
   const uid = params.get("uid");
   const exp = Number(params.get("exp"));
   const sig = params.get("sig");
-  if (!uid || !exp || !sig)
-    return new Response("🚫 Invalid Link", { status: 403 });
+  if (!uid || !exp || !sig) return new Response("🚫 Invalid Link", { status: 403 });
 
   // 🇲🇾 当前马来西亚时间（UTC+8）
   const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
@@ -61,72 +60,73 @@ async function handleRequest(request) {
   // 4️⃣ 验证签名
   const text = `${uid}:${exp}`;
   const expectedSig = await sign(text, SIGN_SECRET);
-  if (expectedSig !== sig)
-    return new Response("🚫 Invalid Signature", { status: 403 });
+  if (expectedSig !== sig) return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 获取设备与应用指纹
+  // 5️⃣ 生成设备指纹（UID + IP + 简化 UA）
   const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
-  const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || "Unknown";
-  const deviceBase = await getDeviceFingerprint(ua, ip, uid, SIGN_SECRET); // 设备唯一指纹
-  const appFingerprint = await sign(`${deviceBase}:${appType}`, SIGN_SECRET); // 设备+App 唯一标识
+  const deviceFingerprint = await getDeviceFingerprint(ua, ip, uid, SIGN_SECRET);
 
-  // 6️⃣ 从 KV 获取绑定数据
+  // 6️⃣ 读取 KV（结构说明：存储 JSON 对象，形如： { device: "<fingerprint>", apps: ["OTT Player","OTT TV"] } ）
   const key = `uid:${uid}`;
-  let storedData = [];
+  let stored = null;
   try {
-    const json = await UID_BINDINGS.get(key);
-    if (json) storedData = JSON.parse(json);
-  } catch (err) {
+    const raw = await UID_BINDINGS.get(key);
+    if (raw) stored = JSON.parse(raw);
+  } catch (e) {
     return new Response("⚠️ KV 读取失败，请检查配置。", { status: 500 });
   }
 
-  // 🧠 检查是否为同一设备
-  const sameDevice = storedData.some(entry => entry.device === deviceBase);
-
-  // ✅ 如果同设备且已绑定相同 App，不阻止
-  if (storedData.some(entry => entry.appFingerprint === appFingerprint)) {
-    return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
-  }
-
-  // ✅ 如果是同一设备但不同 OTT App，允许最多 3 个
-  if (sameDevice) {
-    const appsOnDevice = storedData.filter(entry => entry.device === deviceBase);
-    if (appsOnDevice.length >= MAX_APP_PER_DEVICE) {
-      return Response.redirect(DEVICE_CONFLICT_URL, 302);
+  // 7️⃣ 规则实现
+  // 情形 A：未绑定（首次登入） => 绑定 device + apps = [appType]
+  if (!stored) {
+    const toStore = { device: deviceFingerprint, apps: [appType] };
+    try {
+      await UID_BINDINGS.put(key, JSON.stringify(toStore));
+      console.log(`UID ${uid} 首次绑定 device, app=${appType}`);
+    } catch (e) {
+      return new Response("⚠️ KV 写入失败，请检查配置。", { status: 500 });
     }
-    storedData.push({ device: deviceBase, appFingerprint, appType });
-    await UID_BINDINGS.put(key, JSON.stringify(storedData));
-    console.log(`✅ UID ${uid} 添加第 ${appsOnDevice.length + 1} 个 OTT 应用: ${appType}`);
-    return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
+    // 允许访问（首次绑定后直接转发）
+    const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
+    return fetch(target, request);
   }
 
-  // 🚫 不同设备登入：封锁
-  if (storedData.length > 0 && !sameDevice) {
+  // 情形 B：已有绑定
+  const sameDevice = stored.device === deviceFingerprint;
+  if (!sameDevice) {
+    // 不同设备 -> 直接封锁（重定向）
     return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
-  // 🆕 首次登入：绑定新设备
-  if (storedData.length === 0) {
-    storedData.push({ device: deviceBase, appFingerprint, appType });
-    await UID_BINDINGS.put(key, JSON.stringify(storedData));
-    console.log(`✅ UID ${uid} 首次绑定设备与应用: ${appType}`);
-    return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
+  // 同设备：检查当前 app 是否已在绑定列表中
+  const apps = Array.isArray(stored.apps) ? stored.apps : [];
+  if (apps.includes(appType)) {
+    // 已绑定该 App -> 允许访问
+    const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
+    return fetch(target, request);
   }
 
-  // 默认转发
-  return proxyToGitHub(request, url, path, GITHUB_PAGES_URL);
+  // 同设备但该 App 尚未绑定
+  if (apps.length < MAX_APPS_PER_DEVICE) {
+    // 可新增绑定：push 并写回 KV
+    apps.push(appType);
+    stored.apps = apps;
+    try {
+      await UID_BINDINGS.put(key, JSON.stringify(stored));
+      console.log(`UID ${uid} 在同设备新增绑定 app=${appType} (now ${apps.length}/${MAX_APPS_PER_DEVICE})`);
+    } catch (e) {
+      return new Response("⚠️ KV 写入失败，请检查配置。", { status: 500 });
+    }
+    const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
+    return fetch(target, request);
+  }
+
+  // 超过配额 -> 封锁
+  return Response.redirect(DEVICE_CONFLICT_URL, 302);
 }
 
 /**
- * 🌐 转发到 GitHub Pages
- */
-async function proxyToGitHub(request, url, path, baseUrl) {
-  const target = `${baseUrl}${path}${url.search}`;
-  return fetch(target, request);
-}
-
-/**
- * 🔐 HMAC SHA256 签名
+ * 🔐 HMAC SHA256 签名函数
  */
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
@@ -143,10 +143,10 @@ async function sign(text, secret) {
 }
 
 /**
- * 📱 设备指纹（加入 IP + UA + UID）
+ * 📱 设备指纹（UID + IP + 简化 UA）
  */
 async function getDeviceFingerprint(ua, ip, uid, secret) {
-  const cleanUA = ua.replace(/\s+/g, " ").trim().slice(0, 100);
+  const cleanUA = ua.replace(/\s+/g, " ").trim().slice(0, 120);
   const base = `${uid}:${ip}:${cleanUA}`;
   return await sign(base, secret);
 }
