@@ -16,9 +16,9 @@ async function handleRequest(request) {
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
 
-  // ✅ 测试路径：/test 可查看马来西亚当前时间 + KV 测试
+  // ✅ 测试路径
   if (path === "/test") {
-    const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000); // 🇲🇾 UTC+8
+    const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
     const formattedMY = malaysiaNow.toISOString().replace("T", " ").slice(0, 19);
     try {
       await UID_BINDINGS.put("test-key", "hello-world");
@@ -51,10 +51,8 @@ async function handleRequest(request) {
   const malaysiaNow = new Date(Date.now() + 8 * 60 * 60 * 1000);
   const nowMillis = malaysiaNow.getTime();
 
-  // 3️⃣ 过期检查（改为重定向）
-  if (nowMillis > exp) {
-    return Response.redirect(EXPIRED_REDIRECT_URL, 302);
-  }
+  // 3️⃣ 过期检查
+  if (nowMillis > exp) return Response.redirect(EXPIRED_REDIRECT_URL, 302);
 
   // 4️⃣ 验证签名
   const text = `${uid}:${exp}`;
@@ -62,36 +60,38 @@ async function handleRequest(request) {
   if (expectedSig !== sig)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 5️⃣ 生成设备指纹
-  const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
+  // 5️⃣ 生成设备指纹（增强版：包含 UA + IP + UID）
+  const ip = request.headers.get("CF-Connecting-IP") || "0.0.0.0";
+  const deviceFingerprint = await getDeviceFingerprint(ua, ip, uid, SIGN_SECRET);
 
-  // 6️⃣ 检查 KV 永久绑定（同一设备共用）
+  // 6️⃣ KV 检查（核心逻辑不变，但更严格）
   const key = `uid:${uid}`;
   let storedFingerprint = null;
 
   try {
     storedFingerprint = await UID_BINDINGS.get(key);
   } catch (err) {
-    return new Response("⚠️ KV 未绑定或读取失败，请检查配置。", { status: 500 });
+    return new Response("⚠️ KV 读取失败，请检查配置。", { status: 500 });
   }
 
+  // 🧠 强化规则：
+  // 第一次登入：绑定设备指纹；
+  // 后续登入：必须同一指纹，否则封锁。
   if (storedFingerprint && storedFingerprint !== deviceFingerprint) {
-    // 🚫 不同设备登入 → 重定向封锁页
     return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
   if (!storedFingerprint) {
-    // ✅ 首次绑定设备（Cloudflare KV 免费计划默认永久保存）
     await UID_BINDINGS.put(key, deviceFingerprint);
   }
 
-  // 7️⃣ 允许访问 GitHub Pages 内容
+  // 7️⃣ 转发访问 GitHub Pages 内容
   const target = `${GITHUB_PAGES_URL}${path}${url.search}`;
   return fetch(target, request);
 }
 
 /**
- * 🔐 HMAC SHA256 签名函数
+ * 🔐 HMAC SHA256 签名
  */
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
@@ -108,18 +108,10 @@ async function sign(text, secret) {
 }
 
 /**
- * 📱 设备指纹提取
+ * 📱 设备指纹（加入 IP + UA + UID，确保唯一）
  */
-async function getDeviceFingerprint(ua, uid, secret) {
-  const baseUA = ua
-    .replace(/OTT\s*(Player|TV|Navigator)/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  const simplifiedUA = baseUA
-    .match(/(Android [0-9.]+|Linux|SmartTV|AFTMM|AFTT|Tizen|Web0S|AppleTV|Build\/[A-Za-z0-9]+)/g)
-    ?.join("_") || baseUA.slice(0, 60);
-
-  const fingerprintText = `${uid}:${simplifiedUA}`;
-  return await sign(fingerprintText, secret);
+async function getDeviceFingerprint(ua, ip, uid, secret) {
+  const cleanUA = ua.replace(/\s+/g, " ").trim().slice(0, 100);
+  const base = `${uid}:${ip}:${cleanUA}`;
+  return await sign(base, secret);
 }
