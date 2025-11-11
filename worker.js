@@ -45,7 +45,7 @@ async function handleRequest(request) {
   if (!sigValid)
     return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 📱 设备指纹 (已改进：更严格地规范化 UA，去除 OTT 应用关键字)
+  // 📱 设备指纹 (已修复：使用 UA 截断技术)
   const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
 
   // 读取 KV 数据
@@ -71,7 +71,7 @@ async function handleRequest(request) {
     if (!stored.apps.includes(appType)) {
       // 如果是新的 OTT 应用，则添加到列表中并更新 KV
       stored.apps.push(appType);
-      // ⚠️ 仅更新 KV 中的 apps 列表，不更改 device 指纹
+      // 仅更新 KV 中的 apps 列表，不更改 device 指纹
       await UID_BINDINGS.put(key, JSON.stringify(stored)); 
       console.log(`🟡 UID ${uid} 同设备使用新应用，新增 ${appType}`);
     } else {
@@ -133,21 +133,19 @@ async function sign(text, secret) {
     .join("");
 }
 
-/** 📱 设备指纹（已改进：更严格地规范化 UA，去除应用关键字）*/
+/** 📱 设备指纹（最终修复：严格截断 UA，最大限度保证同一设备指纹一致）*/
 async function getDeviceFingerprint(ua, uid, secret) {
-  // 定义所有需要移除的 OTT 应用和 TV Box 标识符的正则表达式
-  // 这确保了指纹只基于底层设备信息，忽略应用差异
-  const OTT_KEYWORDS_REGEX = new RegExp(
-    "(OTT Player|OTT TV|OTT Navigator|AFT|MiBOX|SmartTV|BRAVIA|SHIELD|AndroidTV)", 
-    "gi"
-  );
+  // 截断长度：只取前 50 个字符。
+  const PARTIAL_UA_LENGTH = 50; 
   
-  let cleanUA = ua.replace(OTT_KEYWORDS_REGEX, "");
+  // 1. 规范化：移除多余空格
+  let cleanUA = ua.replace(/\s+/g, " ").trim();
   
-  // 规范化：移除多余空格，截断
-  cleanUA = cleanUA.replace(/\s+/g, " ").trim().slice(0, 120);
+  // 2. 截断：只取前 PARTIAL_UA_LENGTH 个字符。
+  // 这忽略了 User-Agent 中尾部的应用特定版本号或名称，专注于设备的通用信息。
+  cleanUA = cleanUA.slice(0, PARTIAL_UA_LENGTH);
   
-  // 仅依赖 uid 和清理后的 UA
+  // 仅依赖 uid 和截断后的 UA
   const base = `${uid}:${cleanUA}`;
   return await sign(base, secret);
 }
