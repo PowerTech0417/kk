@@ -17,9 +17,13 @@ async function handleRequest(request) {
   // =================
 
   const ua = request.headers.get("User-Agent") || "";
-  const isAndroid = ua.includes("Android");
-  // 匹配 TV 或 TV Box 相关的 User-Agent 关键词
-  const isTV = /TV|AFT|MiBOX|SmartTV|BRAVIA|SHIELD|AndroidTV/i.test(ua);
+  // === ✅ Android 全设备识别 ===
+const isAndroid = /Android/i.test(ua);
+const isTV = /TV|AFT|MiBOX|SmartTV|BRAVIA|SHIELD|AndroidTV|Chromecast|FireTV/i.test(ua);
+const isProjector = /Projector|XGIMI|Dangbei|JMGO/i.test(ua);
+const isCar = /Car|HeadUnit|Teyes|Joying|Dasaita|AndroidAuto/i.test(ua);
+const isHandheld = /Odin|GPD|Anbernic|Retroid|G Cloud/i.test(ua);
+const isBox = /Mecool|Ugoos|Tanix|Minix/i.test(ua);
   const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || (isTV ? "OTT-TV-Unknown" : null);
 
   // ❌ 非 OTT 设备/非 Android 
