@@ -22,80 +22,105 @@ async function handleRequest(request) {
   const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || (isTV ? "OTT-TV-Unknown" : null);
 
   // 1️⃣ 参数验证
-  if (!isAndroid || !appType) return Response.redirect(NON_OTT_REDIRECT_URL, 302);
+  if (!isAndroid || !appType) {
+    console.log("🚫 非 OTT 应用访问，重定向至说明页");
+    return Response.redirect(NON_OTT_REDIRECT_URL, 302);
+  }
+
   const uid = params.get("uid");
   const exp = Number(params.get("exp"));
   const sig = params.get("sig");
-  if (!uid || !exp || !sig) return new Response("🚫 Invalid Link: Missing parameters", { status: 403 });
+  if (!uid || !exp || !sig)
+    return new Response("🚫 Invalid Link: Missing parameters", { status: 403 });
 
   // 2️⃣ 过期时间检查（UTC+8）
   const malaysiaNow = Date.now() + 8 * 60 * 60 * 1000;
-  if (malaysiaNow > exp) return Response.redirect(EXPIRED_REDIRECT_URL, 302);
+  if (malaysiaNow > exp) {
+    console.log(`⏰ 链接已过期 UID=${uid}`);
+    return Response.redirect(EXPIRED_REDIRECT_URL, 302);
+  }
 
   // 3️⃣ 签名验证
   const text = `${uid}:${exp}`;
   const expectedSig = await sign(text, SIGN_SECRET);
   const sigValid = await timingSafeCompare(expectedSig, sig);
-  if (!sigValid) return new Response("🚫 Invalid Signature", { status: 403 });
+  if (!sigValid) {
+    console.log(`🚫 签名验证失败 UID=${uid}`);
+    return new Response("🚫 Invalid Signature", { status: 403 });
+  }
 
-  // 4️⃣ 生成指纹（忽略版本号）
+  // 4️⃣ 生成设备指纹（忽略版本号）
   const appFingerprint = await getAppFingerprint(ua, uid, SIGN_SECRET, appType);
 
-  // 5️⃣ 从 KV 读取
+  // 5️⃣ 从 KV 读取绑定与封锁状态
   const key = `uid:${uid}`;
+  const bannedKey = `banned:${uid}`;
+
   let stored = null;
+  let bannedRecord = null;
+
   try {
     stored = await UID_BINDINGS.get(key, "json");
+    bannedRecord = await UID_BINDINGS.get(bannedKey, "json");
   } catch (e) {
-    console.error(`KV Read/Parse Error for ${key}:`, e);
+    console.error(`⚠️ KV Read/Parse Error: ${e}`);
     return new Response("Service temporarily unavailable. (K-Err)", { status: 503 });
   }
 
-  // 6️⃣ 判断首次绑定、已绑定、或已删除
-  // 额外读取 “封锁标记”
-  const bannedKey = `banned:${uid}`;
-  const isBanned = await UID_BINDINGS.get(bannedKey);
-  if (isBanned) {
-    console.log(`🚫 UID ${uid} 被标记为已封锁（KV曾删除）`);
-    return Response.redirect(DEVICE_CONFLICT_URL, 302);
+  // 6️⃣ 永久封锁逻辑：只有新签名可解封
+  if (bannedRecord) {
+    const isNewAuthorizedLink = bannedRecord.sig !== sig;
+    if (!isNewAuthorizedLink) {
+      console.log(`🚫 UID=${uid} 被封锁，拒绝访问`);
+      return Response.redirect(DEVICE_CONFLICT_URL, 302);
+    } else {
+      console.log(`🔄 UID=${uid} 检测到新签名链接，解除封锁`);
+      await UID_BINDINGS.delete(bannedKey);
+      stored = null; // 重新绑定
+    }
   }
 
+  // 7️⃣ 首次绑定 / 已绑定检查
   if (!stored || !stored.fingerprint) {
-    // ✅ 首次登入：允许并记录绑定
-    const toStore = { 
-      fingerprint: appFingerprint, 
+    // ✅ 首次绑定
+    const toStore = {
+      fingerprint: appFingerprint,
       appType: appType,
-      createdAt: new Date().toISOString() 
+      createdAt: new Date().toISOString()
     };
     await UID_BINDINGS.put(key, JSON.stringify(toStore));
-    console.log(`✅ UID ${uid} 首次绑定 App 实例指纹: ${appFingerprint}`);
+    console.log(`✅ UID=${uid} 首次绑定成功 App=${appType}`);
   } else {
-    // 已绑定 → 检查一致性
     const isSameAppInstance = appFingerprint === stored.fingerprint;
     if (isSameAppInstance) {
-      console.log(`🟩 UID ${uid} 同应用实例访问 ${appType}`);
+      console.log(`🟩 UID=${uid} 同设备访问 ${appType}`);
     } else {
-      console.log(`🚫 UID ${uid} 不同 App/设备登入。Stored App: ${stored.appType}`);
-
-      // ⚠️ 记录封锁标记，防止再次绑定
-      await UID_BINDINGS.put(bannedKey, "1");
+      console.log(`🚫 UID=${uid} 检测到不同设备/App 登录，封锁账号`);
+      const bannedInfo = {
+        reason: "device_conflict",
+        sig,
+        appType,
+        bannedAt: new Date().toISOString()
+      };
+      await UID_BINDINGS.put(bannedKey, JSON.stringify(bannedInfo)); // 永久封锁
       await UID_BINDINGS.delete(key);
       return Response.redirect(DEVICE_CONFLICT_URL, 302);
     }
   }
 
-  // ✅ 正常访问
+  // ✅ 通过验证 → 正常访问
   return fetch(`${GITHUB_PAGES_URL}${path}${url.search}`, request);
 }
 
 // =========================================================================
-// 辅助函数
+// 🔐 辅助函数
 // =========================================================================
 
 function hexToBuffer(hex) {
   if (hex.length % 2 !== 0) throw new Error("Invalid hex string length");
   const arr = new Uint8Array(hex.length / 2);
-  for (let i = 0; i < hex.length; i += 2) arr[i / 2] = parseInt(hex.substring(i, i + 2), 16);
+  for (let i = 0; i < hex.length; i += 2)
+    arr[i / 2] = parseInt(hex.substring(i, i + 2), 16);
   return arr.buffer;
 }
 
@@ -105,9 +130,8 @@ async function timingSafeCompare(aHex, bHex) {
     const a = hexToBuffer(aHex);
     const b = hexToBuffer(bHex);
     return await crypto.subtle.timingSafeEqual(a, b);
-  } catch (e) {
-    console.error("Timing safe comparison failed, fallback:", e);
-    return aHex === bHex;
+  } catch {
+    return aHex === bHex; // fallback
   }
 }
 
@@ -119,7 +143,11 @@ async function sign(text, secret) {
     false,
     ["sign"]
   );
-  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(text));
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    new TextEncoder().encode(text)
+  );
   return Array.from(new Uint8Array(signature))
     .map(b => b.toString(16).padStart(2, "0"))
     .join("");
