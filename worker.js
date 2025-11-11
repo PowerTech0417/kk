@@ -2,10 +2,6 @@ addEventListener("fetch", event => {
   event.respondWith(handleRequest(event.request));
 });
 
-// 引入常量
-const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
-const UA_PREFIX_LENGTH = 50; // 用来识别设备的前缀长度
-
 async function handleRequest(request) {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -17,6 +13,7 @@ async function handleRequest(request) {
   const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html";
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
   const SIGN_SECRET = "mySuperSecretKey"; 
+  const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
 
   const ua = request.headers.get("User-Agent") || "";
@@ -24,24 +21,27 @@ async function handleRequest(request) {
   const isTV = /TV|AFT|MiBOX|SmartTV|BRAVIA|SHIELD|AndroidTV/i.test(ua);
   const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || (isTV ? "OTT-TV-Unknown" : null);
 
-  // 1. 预检查和参数验证 (保持不变)
+  // 1. 预检查和参数验证
   if (!isAndroid || !appType) return Response.redirect(NON_OTT_REDIRECT_URL, 302);
   const uid = params.get("uid");
   const exp = Number(params.get("exp"));
   const sig = params.get("sig");
   if (!uid || !exp || !sig) return new Response("🚫 Invalid Link: Missing parameters", { status: 403 });
 
-  // 2. 过期时间检查 (保持不变)
+  // 2. 过期时间检查（UTC+8）
   const malaysiaNow = Date.now() + 8 * 60 * 60 * 1000;
   if (malaysiaNow > exp) return Response.redirect(EXPIRED_REDIRECT_URL, 302);
 
-  // 3. 签名验证 (保持不变)
+  // 3. 签名验证 (防篡改)
   const text = `${uid}:${exp}`;
   const expectedSig = await sign(text, SIGN_SECRET);
-  const sigValid = await timingSafeCompare(expectedSig, sig);
+  const sigValid = await timingSafeCompare(expectedSig, sig); // 使用时间安全比较
   if (!sigValid) return new Response("🚫 Invalid Signature", { status: 403 });
 
-  // 4. KV 读取 (保持不变)
+  // 4. 关键：生成应用实例指纹 (已修复：移除版本号)
+  const appFingerprint = await getAppFingerprint(ua, uid, SIGN_SECRET, appType);
+
+  // 5. KV 读取
   const key = `uid:${uid}`;
   let stored = null;
   try {
@@ -51,44 +51,29 @@ async function handleRequest(request) {
     return new Response("Service temporarily unavailable. (K-Err)", { status: 503 });
   }
 
-  // 5. 新设备指纹 (UA 前缀，用于匹配)
-  // 核心逻辑改变：我们使用一个简单的 UA 前缀作为设备的标识
-  const cleanUA = ua.replace(/\s+/g, " ").trim();
-  const currentUAPrefix = cleanUA.slice(0, UA_PREFIX_LENGTH);
-
   // 6. 核心设备绑定与验证逻辑
   
   // 首次登入 (或 KV 被清除后)
-  if (!stored || !stored.device_ua_prefix) {
+  if (!stored || !stored.fingerprint) {
     const toStore = { 
-      device_ua_prefix: currentUAPrefix, // 存储第一个应用的 UA 前缀作为基准
-      apps: [appType], 
+      fingerprint: appFingerprint, // 存储唯一的指纹
+      appType: appType,
       createdAt: new Date().toISOString() 
     };
     await UID_BINDINGS.put(key, JSON.stringify(toStore));
-    console.log(`✅ UID ${uid} 首次绑定设备，基准前缀: ${currentUAPrefix}`);
+    console.log(`✅ UID ${uid} 首次绑定 App 实例指纹 (已忽略版本号): ${appFingerprint}`);
   } 
   // 已有绑定记录
   else {
-    const storedUAPrefix = stored.device_ua_prefix;
-    
-    // 验证：检查当前 UA 前缀是否与存储的基准前缀高度相似 (即，是否相等)
-    // ⚠️ 注意: 这里我们仍然使用简单的字符串相等，如果不同 App 的 UA 前缀略有不同，需要根据实际情况调整为模糊匹配 (例如，使用 .includes())
-    const isSameDevice = currentUAPrefix === storedUAPrefix;
+    // 检查：当前指纹是否与存储的指纹一致
+    const isSameAppInstance = appFingerprint === stored.fingerprint;
 
-    if (isSameDevice) {
-        // 同一设备，允许登入
-        if (!stored.apps.includes(appType)) {
-            // 新的应用，添加到 apps 列表
-            stored.apps.push(appType);
-            await UID_BINDINGS.put(key, JSON.stringify(stored));
-            console.log(`🟡 UID ${uid} 同设备使用新应用，新增 ${appType}`);
-        } else {
-            console.log(`🟩 UID ${uid} 同设备访问 ${appType}`);
-        }
+    if (isSameAppInstance) {
+        // 同一应用实例登入 (版本已忽略，故可升级)
+        console.log(`🟩 UID ${uid} 同应用实例访问 ${appType}`);
     } else {
-        // 不同设备 (UA 前缀不匹配) → 封锁
-        console.log(`🚫 UID ${uid} 不同设备登入。Stored: "${storedUAPrefix}", Current: "${currentUAPrefix}"`);
+        // 不同应用实例登入 → 封锁
+        console.log(`🚫 UID ${uid} 不同 App/设备登入。Stored App: ${stored.appType}`);
         return Response.redirect(DEVICE_CONFLICT_URL, 302);
     }
   }
@@ -98,7 +83,7 @@ async function handleRequest(request) {
 }
 
 // =========================================================================
-// 签名辅助函数 (保持不变，因为它们用于签名验证，不受设备绑定逻辑影响)
+// 辅助函数 (已更新 getAppFingerprint)
 // =========================================================================
 
 // 辅助函数：将十六进制字符串转换为 ArrayBuffer
@@ -146,3 +131,21 @@ async function sign(text, secret) {
     .join("");
 }
 
+/** 📱 应用实例指纹（已修复：在计算指纹前移除版本号）*/
+async function getAppFingerprint(ua, uid, secret, appType) {
+  // 核心修复：移除当前 AppType 的版本号部分。
+  // 例如，如果 appType 是 "OTT TV"，则匹配 "OTT TV/1.7.2.2" 并将其移除或替换为 "OTT TV/"
+  
+  // 1. 尝试匹配并移除版本号 (e.g., "OTT TV/1.7.2.2" -> "OTT TV/")
+  // 此正则寻找 AppType 后跟斜杠和数字版本号的部分
+  const VERSION_REGEX = new RegExp(`(${appType})/[\\d\\.]+`, "gi");
+  // 替换为 AppType 本身，确保指纹只包含 App 名称，不包含版本。
+  let cleanUA = ua.replace(VERSION_REGEX, `$1`); 
+
+  // 2. 规范化：移除多余空格并截断
+  cleanUA = cleanUA.replace(/\s+/g, " ").trim().slice(0, 120);
+  
+  // 指纹基于 UID、APP 类型和清理后的 UA (不含版本号)
+  const base = `${uid}:${appType}:${cleanUA}`;
+  return await sign(base, secret);
+}
