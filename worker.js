@@ -19,13 +19,12 @@ async function handleRequest(request, event) {
 
   const ua = request.headers.get("User-Agent") || "";
 
-  // === ✅ Android 全设备识别 ===
-  const isAndroid = /Android/i.test(ua);
+  // === ✅ 仅验证 OTT App，不限制 Android 系统 ===
   const isTV = /TV|AFT|MiBOX|SmartTV|BRAVIA|SHIELD|AndroidTV|Chromecast|FireTV/i.test(ua);
   const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || (isTV ? "OTT-TV-Unknown" : null);
 
-  // ❌ 非 OTT 设备/非 Android 
-  if (!isAndroid || !appType) {
+  // ❌ 非 OTT App（非指定App则拒绝）
+  if (!appType) {
     return Response.redirect(NON_OTT_REDIRECT_URL, 302);
   }
 
@@ -51,7 +50,7 @@ async function handleRequest(request, event) {
     return new Response("🚫 Invalid Signature", { status: 403 });
   }
 
-  // 📱 设备指纹（不含 IP 和 appType）
+  // 📱 设备指纹（不含 IP）
   const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
 
   // ⚙️ KV 检查
@@ -68,7 +67,7 @@ async function handleRequest(request, event) {
     return new Response("Service temporarily unavailable. (KV read error)", { status: 503 });
   }
 
-  // === 📋 逻辑控制 ===
+  // === 📋 KV 逻辑控制 ===
   if (!stored) {
     // 首次登入
     const toStore = {
@@ -81,7 +80,7 @@ async function handleRequest(request, event) {
     console.log(`[NEW] UID:${uid.slice(0,4)}... bound to device.`);
   } 
   else if (stored.device === deviceFingerprint) {
-    // 同一设备 → 更新时间与 App 列表
+    // 同一设备 → 更新信息
     if (!stored.apps.includes(appType)) stored.apps.push(appType);
     stored.updatedAt = new Date().toISOString();
 
@@ -94,7 +93,7 @@ async function handleRequest(request, event) {
     return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
-  // ✅ 正常访问 (保持请求信息)
+  // ✅ 正常访问
   return fetch(`${GITHUB_PAGES_URL}${path}${url.search}`, {
     method: request.method,
     headers: request.headers,
