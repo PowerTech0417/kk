@@ -12,8 +12,9 @@ async function handleRequest(request, event) {
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html";
   const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html";
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
-  const SIGN_SECRET = "mySuperSecretKey"; 
+  const SIGN_SECRET = "mySuperSecretKey";
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
+  const KV_EXPIRATION = 0; // ✅ 永不过期
   // =================
 
   const ua = request.headers.get("User-Agent") || "";
@@ -21,11 +22,6 @@ async function handleRequest(request, event) {
   // === ✅ Android 全设备识别 ===
   const isAndroid = /Android/i.test(ua);
   const isTV = /TV|AFT|MiBOX|SmartTV|BRAVIA|SHIELD|AndroidTV|Chromecast|FireTV/i.test(ua);
-  const isProjector = /Projector|XGIMI|Dangbei|JMGO/i.test(ua);
-  const isCar = /Car|HeadUnit|Teyes|Joying|Dasaita|AndroidAuto/i.test(ua);
-  const isHandheld = /Odin|GPD|Anbernic|Retroid|G Cloud/i.test(ua);
-  const isBox = /Mecool|Ugoos|Tanix|Minix/i.test(ua);
-
   const appType = OTT_KEYWORDS.find(k => ua.includes(k)) || (isTV ? "OTT-TV-Unknown" : null);
 
   // ❌ 非 OTT 设备/非 Android 
@@ -55,10 +51,10 @@ async function handleRequest(request, event) {
     return new Response("🚫 Invalid Signature", { status: 403 });
   }
 
-  // 📱 设备指纹（不含 IP 和 appType，代表物理设备）
+  // 📱 设备指纹（不含 IP 和 appType）
   const deviceFingerprint = await getDeviceFingerprint(ua, uid, SIGN_SECRET);
 
-  // 确保 KV 可用
+  // ⚙️ KV 检查
   if (typeof UID_BINDINGS === "undefined") {
     return new Response("Service unavailable. (KV missing)", { status: 503 });
   }
@@ -72,24 +68,33 @@ async function handleRequest(request, event) {
     return new Response("Service temporarily unavailable. (KV read error)", { status: 503 });
   }
 
-  // 首次登入
+  // === 📋 逻辑控制 ===
   if (!stored) {
-    const toStore = { device: deviceFingerprint, apps: [appType], createdAt: new Date().toISOString() };
-    await UID_BINDINGS.put(key, JSON.stringify(toStore));
+    // 首次登入
+    const toStore = {
+      device: deviceFingerprint,
+      apps: [appType],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await UID_BINDINGS.put(key, JSON.stringify(toStore), { expirationTtl: KV_EXPIRATION });
+    console.log(`[NEW] UID:${uid.slice(0,4)}... bound to device.`);
   } 
-  // 同物理设备
   else if (stored.device === deviceFingerprint) {
-    if (!stored.apps.includes(appType)) {
-      stored.apps.push(appType);
-      await UID_BINDINGS.put(key, JSON.stringify(stored));
-    }
+    // 同一设备 → 更新时间与 App 列表
+    if (!stored.apps.includes(appType)) stored.apps.push(appType);
+    stored.updatedAt = new Date().toISOString();
+
+    await UID_BINDINGS.put(key, JSON.stringify(stored), { expirationTtl: KV_EXPIRATION });
+    console.log(`[OK] UID:${uid.slice(0,4)}... same device, refreshed.`);
   } 
-  // 不同设备 → 封锁
   else {
+    // ❌ 不同设备 → 拦截
+    console.log(`[BLOCK] UID:${uid.slice(0,4)}... device mismatch.`);
     return Response.redirect(DEVICE_CONFLICT_URL, 302);
   }
 
-  // ✅ 正常访问 (修正 fetch 参数)
+  // ✅ 正常访问 (保持请求信息)
   return fetch(`${GITHUB_PAGES_URL}${path}${url.search}`, {
     method: request.method,
     headers: request.headers,
@@ -113,7 +118,7 @@ async function sign(text, secret) {
     .join("");
 }
 
-/** ⏱ 时间安全比较（兼容 Cloudflare Worker） */
+/** ⏱ 时间安全比较 */
 function timingSafeCompare(aHex, bHex) {
   if (aHex.length !== bHex.length) return false;
   let diff = 0;
@@ -123,7 +128,7 @@ function timingSafeCompare(aHex, bHex) {
   return diff === 0;
 }
 
-/** 📱 设备指纹（不含 IP 和 appType，代表物理设备）*/
+/** 📱 设备指纹生成 */
 async function getDeviceFingerprint(ua, uid, secret) {
   const cleanUA = ua.toLowerCase().replace(/\s+/g, " ").trim().slice(0, 120);
   const base = `${uid}:${cleanUA}`;
