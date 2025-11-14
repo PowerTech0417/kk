@@ -11,7 +11,7 @@ async function handleRequest(request) {
   const GITHUB_PAGES_URL = "https://modskyshop168-sudo.github.io/cc/";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html";
   const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html";
-  const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/ott-channel-review.html";
+  const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/channel-listott.html";
   const SIGN_SECRET = "mySuperSecretKey"; 
   const OTT_KEYWORDS = ["OTT Player", "OTT TV", "OTT Navigator"];
   // =================
