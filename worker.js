@@ -8,7 +8,8 @@ async function handleRequest(request) {
   const params = url.searchParams;
 
   // === ⚙️ 配置区 ===
-  const GITHUB_PAGES_URL = "https://modskyshop168-sudo.github.io/cc/";
+  // 更改为 R2 资源链接 (M3U 文件)
+  const R2_RESOURCE_URL = "https://pub-3b1b42ae8adb483cb2455c8ee77143d5.r2.dev/pl.m3u";
   const EXPIRED_REDIRECT_URL = "https://life4u22.blogspot.com/p/powertech.html";
   const DEVICE_CONFLICT_URL = "https://life4u22.blogspot.com/p/id-ban.html";
   const NON_OTT_REDIRECT_URL = "https://life4u22.blogspot.com/p/channel-listott.html";
@@ -53,7 +54,9 @@ async function handleRequest(request) {
   let stored = null;
   
   try {
-    stored = await UID_BINDINGS.get(key, "json");
+    // 假设 UID_BINDINGS 是已绑定的 Cloudflare KV 命名空间
+    // NOTE: 在实际运行环境中，您需要确保 UID_BINDINGS 变量已正确定义和绑定
+    stored = await UID_BINDINGS.get(key, "json"); 
   } catch (e) {
     console.error(`KV Read/Parse Error for ${key}:`, e);
     return new Response("Service temporarily unavailable. (K-Err)", { status: 503 });
@@ -84,7 +87,9 @@ async function handleRequest(request) {
   }
 
   // ✅ 正常访问
-  return fetch(`${GITHUB_PAGES_URL}${path}${url.search}`, request);
+  // 成功通过所有验证后，代理并返回 R2 资源的内容
+  // 注意：这里不再转发原始请求的 path 和 query，直接返回 R2 上的 M3U 文件内容。
+  return fetch(R2_RESOURCE_URL, request);
 }
 
 // 辅助函数：将十六进制字符串转换为 ArrayBuffer
@@ -108,14 +113,16 @@ async function timingSafeCompare(aHex, bHex) {
         const a = hexToBuffer(aHex);
         const b = hexToBuffer(bHex);
         
+        // 使用 Web Crypto API 的 timingSafeEqual 进行时间安全比较
         return await crypto.subtle.timingSafeEqual(a, b);
     } catch (e) {
         console.error("Timing safe comparison failed, falling back:", e);
+        // 如果 Web Crypto API 不可用，则回退到普通比较 (在 Worker 环境中通常不会发生)
         return aHex === bHex;
     }
 }
 
-/** 🔐 生成签名 */
+/** 🔐 生成签名 (HMAC-SHA256) */
 async function sign(text, secret) {
   const key = await crypto.subtle.importKey(
     "raw",
@@ -134,8 +141,9 @@ async function sign(text, secret) {
 
 /** 📱 设备指纹（不含 IP 和 appType，代表物理设备）*/
 async function getDeviceFingerprint(ua, uid, secret) {
+  // 清理并截断 User-Agent
   const cleanUA = ua.replace(/\s+/g, " ").trim().slice(0, 120);
-  // 仅依赖 uid 和清理后的 UA
+  // 仅依赖 uid 和清理后的 UA 生成指纹
   const base = `${uid}:${cleanUA}`;
   return await sign(base, secret);
-}
+  }
